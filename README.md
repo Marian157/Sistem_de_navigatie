@@ -5,7 +5,7 @@ Saptamana 1 - Documentare
 
 Saptamana 2 - Importul unei retele de strazi folosind OpenStreetMap
 
-Saptamanile 3 & 4 - Implementarea algoritmului A*
+Saptamanile 3 & 4 - Implementarea algoritmului A*/Dijkstra
 
 Saptamana 5 - Reprezentarea hartii si a traseului utilizand Folium
 
