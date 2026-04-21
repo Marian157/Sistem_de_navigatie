@@ -25,40 +25,52 @@ def index():
     <div id="map" style="height: 100vh;"></div>
 
     <script>
-        var map = L.map('map').setView([47.6573, 23.5681], 14);
+    var map = L.map('map').setView([47.6573, 23.5681], 14);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: 'OSM'
-        }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: 'OSM'
+    }).addTo(map);
+    
+    var clicks = [];
+    var routeLine;
+    var markers = [];
 
-        var clicks = [];
-        var routeLine;
+    map.on('click', function(e) {
 
-        map.on('click', function(e) {
-            clicks.push([e.latlng.lat, e.latlng.lng]);
+        if (clicks.length === 0 && markers.length > 0) {
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
 
-            L.marker(e.latlng).addTo(map);
-
-            if (clicks.length == 2) {
-                fetch('/route', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        start: clicks[0],
-                        end: clicks[1]
-                    })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (routeLine) {
-                        map.removeLayer(routeLine);
-                    }
-                    routeLine = L.polyline(data.route, {color: 'blue'}).addTo(map);
-                });
-
-                clicks = [];
+            if (routeLine) {
+                map.removeLayer(routeLine);
             }
+        }
+
+    clicks.push([e.latlng.lat, e.latlng.lng]);
+
+    var marker = L.marker(e.latlng).addTo(map);
+    markers.push(marker);
+
+    if (clicks.length == 2) {
+        fetch('/route', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                start: clicks[0],
+                end: clicks[1]
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (routeLine) {
+                map.removeLayer(routeLine);
+            }
+            routeLine = L.polyline(data.route, {color: 'blue'}).addTo(map);
         });
+
+        clicks = [];
+    }
+});
     </script>
     </body>
     </html>
