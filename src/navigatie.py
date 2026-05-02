@@ -1,6 +1,7 @@
+import heapq
+import math
 from flask import Flask, request, jsonify
 import osmnx as ox
-import networkx as nx
 import pyproj
 
 app = Flask(__name__)
@@ -30,7 +31,7 @@ def index():
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: 'OSM'
     }).addTo(map);
-    
+
     var clicks = [];
     var routeLine;
     var markers = [];
@@ -76,6 +77,45 @@ def index():
     </html>
     """
 
+def shortest_path(n1, n2):
+    x1, y1 = G.nodes[n1]['x'], G.nodes[n1]['y']
+    x2, y2 = G.nodes[n2]['x'], G.nodes[n2]['y']
+    return math.hypot(x1 - x2, y1 - y2)
+
+def astar(G, start, goal):
+    open_set = []
+    heapq.heappush(open_set, (0, start))
+
+    came_from = {}
+    g_score = {start: 0}
+
+    f_score = {start: shortest_path(start, goal)}
+
+    while open_set:
+        _, nod_curent = heapq.heappop(open_set)
+
+        if nod_curent == goal:
+            path = [nod_curent]
+            while nod_curent in came_from:
+                nod_curent = came_from[nod_curent]
+                path.append(nod_curent)
+            return path[::-1]
+
+        for vecin in G.neighbors(nod_curent):
+            edge_data = G.get_edge_data(nod_curent, vecin)
+            edge = min(edge_data.values(), key=lambda x: x.get("length", 1))
+            weight = edge.get("length", 1)
+
+            g_posibil = g_score[nod_curent] + weight
+
+            if vecin not in g_score or g_posibil < g_score[vecin]:
+                came_from[vecin] = nod_curent
+                g_score[vecin] = g_posibil
+                f = g_posibil + shortest_path(vecin, goal)
+                heapq.heappush(open_set, (f, vecin))
+
+    return None
+
 @app.route("/route", methods=["POST"])
 def route():
     data = request.json
@@ -90,7 +130,7 @@ def route():
     orig = ox.distance.nearest_nodes(G, x1, y1)
     dest = ox.distance.nearest_nodes(G, x2, y2)
 
-    route = nx.shortest_path(G, orig, dest, weight='length')
+    route = astar(G, orig, dest)
 
     projector_back = pyproj.Transformer.from_crs(G.graph["crs"], "epsg:4326", always_xy=True)
 
@@ -99,7 +139,7 @@ def route():
     for u, v in zip(route[:-1], route[1:]):
         edge_data = G.get_edge_data(u, v)
 
-        edge = list(edge_data.values())[0]
+        edge = min(edge_data.values(), key=lambda x: x.get("length", 1))
 
         if "geometry" in edge:
             xs, ys = edge["geometry"].xy
@@ -113,6 +153,7 @@ def route():
             coords.append((lat, lon))
 
     return jsonify({"route": coords})
+
 
 if __name__ == "__main__":
     app.run(debug=True)
