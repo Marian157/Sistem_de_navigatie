@@ -1,6 +1,6 @@
 import heapq
 import math
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import osmnx as ox
 import pyproj
 
@@ -11,71 +11,12 @@ oras = "Baia Mare, Romania"
 G = ox.graph_from_place(oras, network_type='drive')
 G = ox.project_graph(G)
 
+projector = pyproj.Transformer.from_crs("epsg:4326", G.graph["crs"], always_xy=True)
+projector_back = pyproj.Transformer.from_crs(G.graph["crs"], "epsg:4326", always_xy=True)
+
 @app.route("/")
 def index():
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Navigator</title>
-        <meta charset="utf-8" />
-        <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-        <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    </head>
-    <body>
-    <div id="map" style="height: 100vh;"></div>
-
-    <script>
-    var map = L.map('map').setView([47.6573, 23.5681], 14);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: 'OSM'
-    }).addTo(map);
-
-    var clicks = [];
-    var routeLine;
-    var markers = [];
-
-    map.on('click', function(e) {
-
-        if (clicks.length === 0 && markers.length > 0) {
-            markers.forEach(m => map.removeLayer(m));
-            markers = [];
-
-            if (routeLine) {
-                map.removeLayer(routeLine);
-            }
-        }
-
-    clicks.push([e.latlng.lat, e.latlng.lng]);
-
-    var marker = L.marker(e.latlng).addTo(map);
-    markers.push(marker);
-
-    if (clicks.length == 2) {
-        fetch('/route', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                start: clicks[0],
-                end: clicks[1]
-            })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (routeLine) {
-                map.removeLayer(routeLine);
-            }
-            routeLine = L.polyline(data.route, {color: 'blue'}).addTo(map);
-        });
-
-        clicks = [];
-    }
-});
-    </script>
-    </body>
-    </html>
-    """
+    return render_template("index.html")
 
 def shortest_path(n1, n2):
     x1, y1 = G.nodes[n1]['x'], G.nodes[n1]['y']
@@ -116,43 +57,65 @@ def astar(G, start, goal):
 
     return None
 
+def nearest_node_from_edge(G, x, y):
+    u, v, key = ox.distance.nearest_edges(G, x, y)
+
+    x_u, y_u = G.nodes[u]['x'], G.nodes[u]['y']
+    x_v, y_v = G.nodes[v]['x'], G.nodes[v]['y']
+
+    dist_u = math.hypot(x - x_u, y - y_u)
+    dist_v = math.hypot(x - x_v, y - y_v)
+
+    return u if dist_u < dist_v else v
+
 @app.route("/route", methods=["POST"])
 def route():
     data = request.json
-    start = data["start"]
-    end = data["end"]
 
-    projector = pyproj.Transformer.from_crs("epsg:4326", G.graph["crs"], always_xy=True)
+    if "start_address" in data and "end_address" in data:
+        start_lat, start_lon = ox.geocode(data["start_address"])
+        end_lat, end_lon = ox.geocode(data["end_address"])
+    else:
+        start_lat, start_lon = data["start"]
+        end_lat, end_lon = data["end"]
 
-    x1, y1 = projector.transform(start[1], start[0])
-    x2, y2 = projector.transform(end[1], end[0])
+    x1, y1 = projector.transform(start_lon, start_lat)
+    x2, y2 = projector.transform(end_lon, end_lat)
 
-    orig = ox.distance.nearest_nodes(G, x1, y1)
-    dest = ox.distance.nearest_nodes(G, x2, y2)
+    orig = nearest_node_from_edge(G, x1, y1)
+    dest = nearest_node_from_edge(G, x2, y2)
 
     route = astar(G, orig, dest)
 
-    projector_back = pyproj.Transformer.from_crs(G.graph["crs"], "epsg:4326", always_xy=True)
+    distanta_totala = 0
 
     coords = []
 
-    for u, v in zip(route[:-1], route[1:]):
+    for i, (u, v) in enumerate(zip(route[:-1], route[1:])):
         edge_data = G.get_edge_data(u, v)
-
         edge = min(edge_data.values(), key=lambda x: x.get("length", 1))
+        distanta_totala += edge.get("length", 0)
 
         if "geometry" in edge:
             xs, ys = edge["geometry"].xy
-            for x, y in zip(xs, ys):
-                lon, lat = projector_back.transform(x, y)
-                coords.append((lat, lon))
+            points = list(zip(xs, ys))
         else:
-            x = G.nodes[u]['x']
-            y = G.nodes[u]['y']
+            points = [
+                (G.nodes[u]['x'], G.nodes[u]['y']),
+                (G.nodes[v]['x'], G.nodes[v]['y'])
+            ]
+
+        if i > 0:
+            points = points[1:]
+
+        for x, y in points:
             lon, lat = projector_back.transform(x, y)
             coords.append((lat, lon))
 
-    return jsonify({"route": coords})
+    return jsonify({
+        "route": coords,
+        "distance": distanta_totala
+    })
 
 
 if __name__ == "__main__":
